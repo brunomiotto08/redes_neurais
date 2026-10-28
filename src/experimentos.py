@@ -162,7 +162,9 @@ def _rodar_grupo(nome, ocultas, taxa, epocas, pesos, X_treino, y_treino, X_val, 
         rede, historico = _treinar(
             X_treino, y_treino, X_val, y_val, ocultas, taxa, epocas, semente, pesos
         )
-        execucoes.append(_avaliar_execucao(rede, historico, X_val, y_val, X_teste, y_teste, semente))
+        execucao = _avaliar_execucao(rede, historico, X_val, y_val, X_teste, y_teste, semente)
+        execucoes.append(execucao)
+        _imprimir_execucao(nome, execucao)
     medias, desvios, f1_validacao = _resumir(execucoes)
     return {
         "nome": nome,
@@ -356,7 +358,39 @@ def _linha_tabela(nome, medias, desvios):
     return linha
 
 
-def _salvar_tabelas(linhas, importancia):
+def _linha_execucao(nome, numero, semente, limiar, metricas):
+    return {
+        "modelo": nome,
+        "execucao": numero,
+        "semente": semente,
+        "limiar": "" if limiar is None else round(limiar, 4),
+        "acuracia": round(metricas["acuracia"], 6),
+        "erro": round(metricas["erro"], 6),
+        "sensitividade": round(metricas["recall"], 6),
+        "precisao": round(metricas["precisao"], 6),
+        "especificidade": round(metricas["especificidade"], 6),
+        "f1": round(metricas["f1"], 6),
+        "auc": round(metricas["auc"], 6),
+        "vp": metricas["tp"],
+        "fn": metricas["fn"],
+        "fp": metricas["fp"],
+        "vn": metricas["tn"],
+    }
+
+
+def _imprimir_execucao(nome, execucao):
+    teste = execucao["metricas_teste"]
+    print(
+        f"    {nome} semente {execucao['semente']}: "
+        f"acc {teste['acuracia']:.3f}  erro {teste['erro']:.3f}  "
+        f"sens {teste['recall']:.3f}  prec {teste['precisao']:.3f}  "
+        f"esp {teste['especificidade']:.3f}  f1 {teste['f1']:.3f}  "
+        f"auc {teste['auc']:.3f}",
+        flush=True,
+    )
+
+
+def _salvar_tabelas(linhas, execucoes, importancia):
     RESULTADOS.mkdir(parents=True, exist_ok=True)
     campos = ["modelo"]
     for campo in CAMPOS:
@@ -365,6 +399,27 @@ def _salvar_tabelas(linhas, importancia):
         escritor = csv.DictWriter(arquivo, fieldnames=campos)
         escritor.writeheader()
         escritor.writerows(linhas)
+    campos_execucao = [
+        "modelo",
+        "execucao",
+        "semente",
+        "limiar",
+        "acuracia",
+        "erro",
+        "sensitividade",
+        "precisao",
+        "especificidade",
+        "f1",
+        "auc",
+        "vp",
+        "fn",
+        "fp",
+        "vn",
+    ]
+    with (RESULTADOS / "metricas_por_execucao.csv").open("w", newline="", encoding="utf-8") as arquivo:
+        escritor = csv.DictWriter(arquivo, fieldnames=campos_execucao)
+        escritor.writeheader()
+        escritor.writerows(execucoes)
     with (RESULTADOS / "importancia.csv").open("w", newline="", encoding="utf-8") as arquivo:
         campos_importancia = [
             "variavel",
@@ -556,8 +611,32 @@ def executar_estudo():
         _linha_tabela(grupo_pts["nome"], grupo_pts["medias"], grupo_pts["desvios"]),
     ]
     linhas.extend(_linha_tabela(grupo["nome"], grupo["medias"], grupo["desvios"]) for grupo in grupos)
-    _salvar_tabelas(linhas, importancia_ordenada)
+    execucoes_tabela = [
+        _linha_execucao("Sempre Bad", 1, "", None, baseline),
+    ]
+    for grupo in (grupo_pts, *grupos):
+        for numero, execucao in enumerate(grupo["execucoes"], start=1):
+            execucoes_tabela.append(
+                _linha_execucao(
+                    grupo["nome"],
+                    numero,
+                    execucao["semente"],
+                    execucao["limiar"],
+                    execucao["metricas_teste"],
+                )
+            )
+    _salvar_tabelas(linhas, execucoes_tabela, importancia_ordenada)
     _imprimir_tabela(linhas)
+    print("\nCada execução no teste", flush=True)
+    for linha in execucoes_tabela:
+        print(
+            f"{linha['modelo']:<22} exec {linha['execucao']}  "
+            f"acc {linha['acuracia']:.3f}  erro {linha['erro']:.3f}  "
+            f"sens {linha['sensitividade']:.3f}  prec {linha['precisao']:.3f}  "
+            f"esp {linha['especificidade']:.3f}  f1 {linha['f1']:.3f}  "
+            f"auc {linha['auc']:.3f}",
+            flush=True,
+        )
 
     pacote = {
         "limpeza": resumo,
